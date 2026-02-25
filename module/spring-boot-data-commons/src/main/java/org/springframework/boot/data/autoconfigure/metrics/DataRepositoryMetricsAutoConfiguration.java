@@ -17,6 +17,7 @@
 package org.springframework.boot.data.autoconfigure.metrics;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.observation.ObservationRegistry;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -62,10 +63,12 @@ public final class DataRepositoryMetricsAutoConfiguration {
 	@Bean
 	@ConditionalOnMissingBean
 	MetricsRepositoryMethodInvocationListener metricsRepositoryMethodInvocationListener(
-			ObjectProvider<MeterRegistry> registry, RepositoryTagsProvider tagsProvider) {
+			ObjectProvider<MeterRegistry> registry, RepositoryTagsProvider tagsProvider,
+			ObjectProvider<ObservationRegistry> observationRegistry) {
 		Repository properties = this.properties.getRepository();
 		return new MetricsRepositoryMethodInvocationListener(registry::getObject, tagsProvider,
-				properties.getMetricName(), new PropertiesAutoTimer(properties.getAutotime()));
+				properties.getMetricName(), new PropertiesAutoTimer(properties.getAutotime()),
+				observationRegistry::getIfAvailable);
 	}
 
 	@Bean

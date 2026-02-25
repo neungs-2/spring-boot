@@ -17,11 +17,17 @@
 package org.springframework.boot.data.metrics;
 
 import java.lang.reflect.Method;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import io.micrometer.core.annotation.Timed;
 import io.micrometer.core.instrument.MockClock;
 import io.micrometer.core.instrument.simple.SimpleConfig;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationHandler;
+import io.micrometer.observation.ObservationRegistry;
+import io.micrometer.observation.annotation.Observed;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -46,14 +52,22 @@ class MetricsRepositoryMethodInvocationListenerTests {
 
 	private SimpleMeterRegistry registry;
 
+	private ObservationRegistry observationRegistry;
+
+	private RecordingObservationHandler observationHandler;
+
 	private MetricsRepositoryMethodInvocationListener listener;
 
 	@BeforeEach
 	void setup() {
 		MockClock clock = new MockClock();
 		this.registry = new SimpleMeterRegistry(SimpleConfig.DEFAULT, clock);
+		this.observationRegistry = ObservationRegistry.create();
+		this.observationHandler = new RecordingObservationHandler();
+		this.observationRegistry.observationConfig().observationHandler(this.observationHandler);
 		this.listener = new MetricsRepositoryMethodInvocationListener(() -> this.registry,
-				new DefaultRepositoryTagsProvider(), REQUEST_METRICS_NAME, AutoTimer.ENABLED);
+				new DefaultRepositoryTagsProvider(), REQUEST_METRICS_NAME, AutoTimer.ENABLED,
+				() -> this.observationRegistry);
 	}
 
 	@Test
@@ -82,6 +96,24 @@ class MetricsRepositoryMethodInvocationListenerTests {
 	void afterInvocationWhenAutoTimedRecordsMetrics() {
 		this.listener.afterInvocation(createInvocation(NoAnnotationsRepository.class));
 		assertMetricsContainsTag("state", "SUCCESS");
+	}
+
+	@Test
+	void afterInvocationWhenObservedMethodCreatesObservation() {
+		this.listener.afterInvocation(createInvocation(ObservedMethodRepository.class));
+		assertThat(this.observationHandler.observationNames()).contains("repository.observed.method");
+	}
+
+	@Test
+	void afterInvocationWhenObservedClassCreatesObservation() {
+		this.listener.afterInvocation(createInvocation(ObservedClassRepository.class));
+		assertThat(this.observationHandler.observationNames()).contains("repository.observed.class");
+	}
+
+	@Test
+	void afterInvocationWhenNoObservedAnnotationsDoesNotCreateObservation() {
+		this.listener.afterInvocation(createInvocation(NoAnnotationsRepository.class));
+		assertThat(this.observationHandler.observationNames()).isEmpty();
 	}
 
 	private void assertMetricsContainsTag(String tagKey, String tagValue) {
@@ -113,6 +145,40 @@ class MetricsRepositoryMethodInvocationListenerTests {
 	interface TimedClassRepository extends Repository<Example, Long> {
 
 		Example findById(long id);
+
+	}
+
+	interface ObservedMethodRepository extends Repository<Example, Long> {
+
+		@Observed(name = "repository.observed.method")
+		Example findById(long id);
+
+	}
+
+	@Observed(name = "repository.observed.class")
+	interface ObservedClassRepository extends Repository<Example, Long> {
+
+		Example findById(long id);
+
+	}
+
+	private static class RecordingObservationHandler implements ObservationHandler<Observation.Context> {
+
+		private final List<String> observationNames = new CopyOnWriteArrayList<>();
+
+		@Override
+		public void onStart(Observation.Context context) {
+			this.observationNames.add(context.getName());
+		}
+
+		@Override
+		public boolean supportsContext(Observation.Context context) {
+			return true;
+		}
+
+		List<String> observationNames() {
+			return this.observationNames;
+		}
 
 	}
 

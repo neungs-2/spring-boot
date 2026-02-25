@@ -18,6 +18,8 @@ package org.springframework.boot.data.autoconfigure.metrics;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Supplier;
 
 import io.micrometer.core.annotation.Timed;
@@ -28,6 +30,10 @@ import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.binder.MeterBinder;
 import io.micrometer.core.instrument.distribution.HistogramSnapshot;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationHandler;
+import io.micrometer.observation.ObservationRegistry;
+import io.micrometer.observation.annotation.Observed;
 import org.junit.jupiter.api.Test;
 
 import org.springframework.beans.factory.ObjectFactory;
@@ -141,6 +147,15 @@ class DataRepositoryMetricsAutoConfigurationTests {
 				.isNotNull());
 	}
 
+	@Test
+	void observedAnnotationsCreateObservationsWhenObservationRegistryIsPresent() {
+		this.contextRunner.withUserConfiguration(ObservationConfiguration.class).run((context) -> {
+			getInitializedMeterRegistry(context, ExampleObservedRepository.class);
+			assertThat(context.getBean(RecordingObservationHandler.class).observationNames())
+				.contains("repository.observed");
+		});
+	}
+
 	private MeterRegistry getInitializedMeterRegistry(AssertableApplicationContext context,
 			Class<?> repositoryInterface) {
 		MetricsRepositoryMethodInvocationListener listener = context
@@ -185,6 +200,23 @@ class DataRepositoryMetricsAutoConfigurationTests {
 	}
 
 	@Configuration(proxyBeanMethods = false)
+	static class ObservationConfiguration {
+
+		@Bean
+		RecordingObservationHandler observationHandler() {
+			return new RecordingObservationHandler();
+		}
+
+		@Bean
+		ObservationRegistry observationRegistry(RecordingObservationHandler observationHandler) {
+			ObservationRegistry observationRegistry = ObservationRegistry.create();
+			observationRegistry.observationConfig().observationHandler(observationHandler);
+			return observationRegistry;
+		}
+
+	}
+
+	@Configuration(proxyBeanMethods = false)
 	static class MetricsRepositoryMethodInvocationListenerConfiguration {
 
 		@Bean
@@ -216,6 +248,33 @@ class DataRepositoryMetricsAutoConfigurationTests {
 		long count();
 
 		long delete();
+
+	}
+
+	interface ExampleObservedRepository extends Repository<Example, Long> {
+
+		@Observed(name = "repository.observed")
+		long count();
+
+	}
+
+	private static final class RecordingObservationHandler implements ObservationHandler<Observation.Context> {
+
+		private final List<String> observationNames = new CopyOnWriteArrayList<>();
+
+		@Override
+		public void onStart(Observation.Context context) {
+			this.observationNames.add(context.getName());
+		}
+
+		@Override
+		public boolean supportsContext(Observation.Context context) {
+			return true;
+		}
+
+		List<String> observationNames() {
+			return this.observationNames;
+		}
 
 	}
 
